@@ -4,16 +4,15 @@ from keras.layers import Dense
 from keras.models import Sequential
 from keras.optimizers import Adam
 
-ENVS = 'Ant-V2'
+ENVS = 'Humanoid-v2'
 
 
-def test_policy(policy_fun):
+def verify_policy(policy_fun):
     class ARGS(object):
         pass
 
     args = ARGS()
     args.envname = ENVS
-    args.expert_policy_file = 'experts/%s.pkl' % ENVS
     args.max_timesteps = 1000
     args.num_rollouts = 10
     args.render = True
@@ -53,29 +52,30 @@ def load_expert_data():
     return data['observations'], data['actions']
 
 
-def make_model(input_shape, action_shape):
+def make_model(input_shape, action_num):
     model = Sequential()
     model.add(Dense(units=128, activation='relu', input_shape=input_shape))
     model.add(Dense(units=256, activation='relu'))
-    model.add(Dense(units=action_shape, activation='linear'))
+    model.add(Dense(units=action_num, activation='linear'))
 
     adam = Adam(lr=1e-3)
-    model.compile(optimizer=adam, loss='mse', metrics='mae')
+    model.compile(optimizer=adam, loss='mse', metrics=['mae'])
     return model
 
 
 def imitation():
     test_data, test_label = load_expert_data()
+    test_label = test_label.reshape((test_label.shape[0], test_label.shape[-1]))
     input_shape = test_data.shape[1:]
-    action_shape = test_label.shape[1:]
-    model = make_model(input_shape, action_shape)
+    action_num = test_label.shape[-1]
+    model = make_model(input_shape, action_num)
 
-    model.fit(test_data, test_label, batch_size=128, epochs=40, verbose=1)
+    model.fit(test_data, test_label, batch_size=128, epochs=100, verbose=2)
 
     def policy_fun(obs):
         return model.predict(obs)
 
-    test_policy(policy_fun)
+    verify_policy(policy_fun)
 
 
 if __name__ == '__main__':

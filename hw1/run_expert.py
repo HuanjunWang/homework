@@ -48,7 +48,7 @@ def run(args):
                 steps += 1
                 if args.render:
                     env.render()
-                if steps % 100 == 0: print("%i/%i" % (steps, max_steps))
+                if steps % 1000 == 0: print("%i/%i" % (steps, max_steps))
                 if steps >= max_steps:
                     break
             returns.append(totalr)
@@ -82,12 +82,12 @@ def auto_run():
         pass
 
     args = ARGS()
-    args.envname = ''
-    args.expert_policy_file = ''
-    args.max_timesteps = 1000
-    args.num_rollouts = 10
-    args.render = True
+    args.envname = 'Humanoid-v2'
+    args.expert_policy_file = './experts/%s.pkl'%args.envname
+    args.max_timesteps = 4000
+    args.num_rollouts = 100
+    args.render = False
     run(args)
 
 if __name__ == '__main__':
-    main()
+    auto_run()
