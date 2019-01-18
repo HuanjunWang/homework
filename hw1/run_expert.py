@@ -17,17 +17,8 @@ import tf_util
 import gym
 import load_policy
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('expert_policy_file', type=str)
-    parser.add_argument('envname', type=str)
-    parser.add_argument('--render', action='store_true')
-    parser.add_argument("--max_timesteps", type=int)
-    parser.add_argument('--num_rollouts', type=int, default=20,
-                        help='Number of expert roll outs')
-    args = parser.parse_args()
 
+def run(args):
     print('loading and building expert policy')
     policy_fn = load_policy.load_policy(args.expert_policy_file)
     print('loaded and built')
@@ -49,7 +40,7 @@ def main():
             totalr = 0.
             steps = 0
             while not done:
-                action = policy_fn(obs[None,:])
+                action = policy_fn(obs[None, :])
                 observations.append(obs)
                 actions.append(action)
                 obs, r, done, _ = env.step(action)
@@ -57,7 +48,7 @@ def main():
                 steps += 1
                 if args.render:
                     env.render()
-                if steps % 100 == 0: print("%i/%i"%(steps, max_steps))
+                if steps % 100 == 0: print("%i/%i" % (steps, max_steps))
                 if steps >= max_steps:
                     break
             returns.append(totalr)
@@ -71,6 +62,32 @@ def main():
 
         with open(os.path.join('expert_data', args.envname + '.pkl'), 'wb') as f:
             pickle.dump(expert_data, f, pickle.HIGHEST_PROTOCOL)
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('expert_policy_file', type=str)
+    parser.add_argument('envname', type=str)
+    parser.add_argument('--render', action='store_true')
+    parser.add_argument("--max_timesteps", type=int)
+    parser.add_argument('--num_rollouts', type=int, default=20,
+                        help='Number of expert roll outs')
+    args = parser.parse_args()
+    run(args)
+
+
+def auto_run():
+    class ARGS(object):
+        pass
+
+    args = ARGS()
+    args.envname = ''
+    args.expert_policy_file = ''
+    args.max_timesteps = 1000
+    args.num_rollouts = 10
+    args.render = True
+    run(args)
 
 if __name__ == '__main__':
     main()
