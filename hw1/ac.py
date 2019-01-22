@@ -5,9 +5,9 @@ from keras.optimizers import Adam,SGD
 import gym
 import tensorflow as tf
 
-ENVS = 'Ant-v2'
+ENVS = 'Humanoid-v2'
 SIGMA = 5.
-LEARNING_RATE = 1e-5
+LEARNING_RATE = 5e-5
 
 def verify_policy(env, policy_fun):
     class ARGS(object):
@@ -15,9 +15,9 @@ def verify_policy(env, policy_fun):
 
     args = ARGS()
     args.envname = ENVS
-    args.max_timesteps = 300
-    args.num_rollouts = 1
-    args.render = True
+    args.max_timesteps = 2000
+    args.num_rollouts = 10
+    args.render = False
 
     #env = gym.make(args.envname)
     max_steps = args.max_timesteps or env.spec.timestep_limit
@@ -49,9 +49,6 @@ def make_gauss_model(input_shape, action_num):
     model = Sequential()
     model.add(Dense(units=256, activation='relu', input_shape=input_shape))
     model.add(Dense(units=256, activation='relu'))
-    model.add(Dense(units=256, activation='relu'))
-    model.add(Dense(units=256, activation='relu'))
-    model.add(Dense(units=256, activation='relu'))
     model.add(Dense(units=action_num, activation='linear'))
 
     adam = Adam(lr=LEARNING_RATE)
@@ -68,9 +65,6 @@ def make_gauss_model(input_shape, action_num):
 def make_value_model(input_shape):
     model = Sequential()
     model.add(Dense(units=256, activation='relu', input_shape=input_shape))
-    model.add(Dense(units=256, activation='relu'))
-    model.add(Dense(units=256, activation='relu'))
-    model.add(Dense(units=256, activation='relu'))
     model.add(Dense(units=256, activation='relu'))
     model.add(Dense(units=1, activation='linear'))
 
@@ -112,6 +106,11 @@ def step1_sample(env, policy_fun, min_steps=500):
 
 def ac():
     env = gym.make(ENVS)
+    random_seed = 1
+    env.seed(random_seed)
+    np.random.seed(random_seed)
+    tf.random.set_random_seed(random_seed)
+
     input_shape = env.observation_space.shape
     action_num = env.action_space.shape[0]
 
@@ -141,7 +140,7 @@ def ac():
         next_v = value_model.predict(next_states).ravel()
         this_v = value_model.predict(current_states).ravel()
         advances = rewards + next_v * final_state - this_v
-        print("Advances:", np.mean(advances))
+        advances = (advances - np.mean(advances)) / np.std(advances)
 
         policy_model.fit(current_states, np.hstack((actions, advances[:, None])), batch_size=128, epochs=1, verbose=2)
 
