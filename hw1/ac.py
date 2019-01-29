@@ -7,7 +7,7 @@ import tensorflow as tf
 
 ENVS = 'Humanoid-v2'
 SIGMA = 5.
-LEARNING_RATE = 5e-5
+LEARNING_RATE = 1e-3
 
 def verify_policy(env, policy_fun):
     class ARGS(object):
@@ -128,7 +128,7 @@ def ac():
         print("epoch:", epoch)
 
         # Step 1, Sample
-        current_states, actions, rewards, next_states, final_state = step1_sample(env, policy_fun_gauss, min_steps=5000)
+        current_states, actions, rewards, next_states, final_state = step1_sample(env, policy_fun_gauss, min_steps=50000)
 
         # Step 2, Fit the value model
         for _ in range(10):
@@ -148,7 +148,7 @@ def ac():
             mu = policy_model.predict(obs)
             return np.random.normal(mu, .01)[0]
 
-        if epoch % 10 == 0:
+        if epoch % 100 == 0:
             verify_policy(env, policy_fun_gauss2)
 
 
