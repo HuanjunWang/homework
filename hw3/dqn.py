@@ -158,8 +158,19 @@ class QLearner(object):
     # Tip: use huber_loss (from dqn_utils) instead of squared error when defining self.total_error
     ######
 
-    # YOUR CODE HERE
+    all_q_values = q_func(obs_t_float, self.num_actions, scope="q_func", reuse = False)
+    row_index = tf.range(0, tf.shape(self.act_t_ph)[0])
+    action_index = tf.concat([tf.expand_dims(row_index,-1), tf.expand_dims(self.act_t_ph, -1)], axis=1)
+    q_values = tf.gather_nd(all_q_values, action_index)
+    q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
 
+
+    all_next_state_q_values = q_func(obs_tp1_float, self.num_actions, scope="target_q_func", reuse = False)
+    next_state_q_values = tf.reduce_max(all_next_state_q_values, axis=1)
+    target_q_values = self.rew_t_ph + gamma * next_state_q_values
+    target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
+
+    self.total_error = huber_loss(q_values - target_q_values)
     ######
 
     # construct optimization op (with gradient clipping)
