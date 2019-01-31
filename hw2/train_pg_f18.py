@@ -732,23 +732,18 @@ class ARGS(object):
     render = True
     discount = .9
     n_iter = 1000
-    batch_size = 1000
     ep_len = 150
-    learning_rate = 3e-2
-    reward_to_go = True
-    dont_normalize_advantages = True
-    nn_baseline = True
     seed = 1
     n_experiments = 5
     n_layers = 2
-    size = 128
+    size = 32
 
 
 def fast_run():
     args = ARGS()
 
-    for batch_size in [50000]:
-        for lr in [.01]:
+    for batch_size in [30000]:
+        for lr in [.02]:
             for rtg in [True]:
                 for dna in [False]:
                     for baseline in [True]:
