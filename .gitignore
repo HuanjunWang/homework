@@ -11,6 +11,8 @@ data/
 #pycharm
 .idea
 
+.pkl
+
 # Distribution / packaging
 .Python
 env/

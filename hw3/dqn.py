@@ -167,7 +167,8 @@ class QLearner(object):
 
         all_next_state_q_values = q_func(obs_tp1_float, self.num_actions, scope="target_q_func", reuse=False)
         next_state_q_values = tf.reduce_max(all_next_state_q_values, axis=1)
-        target_q_values = self.rew_t_ph + gamma * next_state_q_values
+        next_state_q_values_without_end = next_state_q_values * self.done_mask_ph
+        target_q_values = self.rew_t_ph + gamma * next_state_q_values_without_end
         target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
         self.total_error = huber_loss(q_values - target_q_values)
@@ -240,7 +241,7 @@ class QLearner(object):
         #####
         self.replay_buffer_idx = self.replay_buffer.store_frame(self.last_obs)
         esp = self.exploration.value(self.t)
-        if np.random.rand() < esp:
+        if not self.model_initialized or np.random.rand() < esp:
             action = self.env.action_space.sample()
         else:
             obs = self.replay_buffer.encode_recent_observation()
@@ -300,10 +301,22 @@ class QLearner(object):
 
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = self.replay_buffer.sample(self.batch_size)
 
-            initialize_interdependent_variables(self.session, tf.global_variables(), {
-                self.obs_t_ph: obs_batch,
-                self.obs_tp1_ph: next_obs_batch,
-            })
+            if not self.model_initialized:
+                # TODO why need feeddict
+                initialize_interdependent_variables(self.session, tf.global_variables(), {
+                    self.obs_t_ph: obs_batch,
+                    self.obs_tp1_ph: next_obs_batch,
+                })
+                self.model_initialized = True
+
+            self.session.run(self.train_fn, feed_dict={self.obs_t_ph: obs_batch, self.act_t_ph: act_batch,
+                                                       self.rew_t_ph: rew_batch, self.obs_tp1_ph: next_obs_batch,
+                                                       self.done_mask_ph: done_mask,
+                                                       self.learning_rate: self.optimizer_spec.lr_schedule.value(
+                                                           self.t)})
+
+            if self.t % self.target_update_freq == 0:
+                self.session.run(self.update_target_fn)
 
             self.num_param_updates += 1
 
