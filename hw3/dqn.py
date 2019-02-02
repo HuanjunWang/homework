@@ -167,7 +167,7 @@ class QLearner(object):
 
         all_next_state_q_values = q_func(obs_tp1_float, self.num_actions, scope="target_q_func", reuse=False)
         next_state_q_values = tf.reduce_max(all_next_state_q_values, axis=1)
-        next_state_q_values_without_end = next_state_q_values * self.done_mask_ph
+        next_state_q_values_without_end = next_state_q_values * (1 - self.done_mask_ph) #TODO tf.logical_not
         target_q_values = self.rew_t_ph + gamma * next_state_q_values_without_end
         target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
