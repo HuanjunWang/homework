@@ -108,11 +108,13 @@ class Agent(object):
         """
         sy_ob_no = tf.placeholder(shape=[None, self.ob_dim], name="observation", dtype=tf.float32)
         if self.discrete:
-            sy_ac_na = tf.placeholder(shape=[None], name="ac", dtype=tf.int32)
+            sy_ac_na = tf.placeholder(shape=[None], name="action", dtype=tf.int32)
         else:
             sy_ac_na = tf.placeholder(shape=[None, self.ac_dim], name="action", dtype=tf.float32)
         sy_adv_n = tf.placeholder(shape=[None], name='advance', dtype=tf.float32)
-        return sy_ob_no, sy_ac_na, sy_adv_n
+        sy_reward_n = tf.placeholder(shape=[None], name="Reward", dtype=tf.int32)
+
+        return sy_ob_no, sy_ac_na, sy_adv_n, sy_reward_n
 
     # ========================================================================================#
     #                           ----------PROBLEM 2----------
@@ -184,19 +186,19 @@ class Agent(object):
         
                  This reduces the problem to just sampling z. (Hint: use tf.random_normal!)
         """
-
-        if self.discrete:
-            sy_logits_na = policy_parameters
-            dist = tf.distributions.Categorical(sy_logits_na)
-            sy_sampled_ac = dist.sample()
-        else:
-            sy_mean, sy_logstd = policy_parameters
-            # YOUR_CODE_HERE
-            batch_size = tf.shape(sy_mean)[0]
-            sy_sampled_ac = tf.random_normal(shape=[batch_size, self.ac_dim])
-            # TODO the logstd
-            sy_sampled_ac = tf.multiply(sy_sampled_ac, tf.exp(sy_logstd))
-            sy_sampled_ac = tf.add(sy_sampled_ac, sy_mean)
+        with tf.variable_scope("Sample"):
+            if self.discrete:
+                sy_logits_na = policy_parameters
+                dist = tf.distributions.Categorical(sy_logits_na)
+                sy_sampled_ac = dist.sample()
+            else:
+                sy_mean, sy_logstd = policy_parameters
+                # YOUR_CODE_HERE
+                batch_size = tf.shape(sy_mean)[0]
+                sy_sampled_ac = tf.random_normal(shape=[batch_size, self.ac_dim])
+                # TODO the logstd
+                sy_sampled_ac = tf.multiply(sy_sampled_ac, tf.exp(sy_logstd))
+                sy_sampled_ac = tf.add(sy_sampled_ac, sy_mean)
 
         return sy_sampled_ac
 
@@ -238,7 +240,7 @@ class Agent(object):
             # TODO DEBUG
         return sy_logprob_n
 
-    def build_computation_graph(self):
+    def build_computation_graph(self, logdir):
         """
             Notes on notation:
             
@@ -259,7 +261,7 @@ class Agent(object):
             loss: a function of self.sy_logprob_n and self.sy_adv_n that we will differentiate
                 to get the policy gradient.
         """
-        self.sy_ob_no, self.sy_ac_na, self.sy_adv_n = self.define_placeholders()
+        self.sy_ob_no, self.sy_ac_na, self.sy_adv_n, self.sy_reward_n = self.define_placeholders()
 
         # The policy takes in an observation and produces a distribution over the action space
         self.policy_parameters = self.policy_forward_pass(self.sy_ob_no, scope="new", trainable=True)
@@ -274,22 +276,23 @@ class Agent(object):
         # This will be called in Agent.sample_trajectory() where we generate a rollout.
         self.sy_sampled_ac = self.sample_action(self.policy_parameters)
 
-        # We can also compute the logprob of the actions that were actually taken by the policy
-        # This is used in the loss function.
-        self.sy_new_logprob_n = self.get_log_prob(self.policy_parameters, self.sy_ac_na)
-        self.sy_old_logprob_n = self.get_log_prob(self.old_policy_parameters, self.sy_ac_na)
+        with tf.name_scope("Loss"):
+            # We can also compute the logprob of the actions that were actually taken by the policy
+            # This is used in the loss function.
+            self.sy_new_logprob_n = self.get_log_prob(self.policy_parameters, self.sy_ac_na)
+            self.sy_old_logprob_n = self.get_log_prob(self.old_policy_parameters, self.sy_ac_na)
 
-        # ========================================================================================#
-        #                           ----------PROBLEM 2----------
-        # Loss Function and Training Operation
-        # Use the PPO lose function
-        # ========================================================================================#
-        ratio = tf.exp(self.sy_new_logprob_n - self.sy_old_logprob_n)
-        cpi_loss = ratio * self.sy_adv_n
-        clip_param = .2
-        clip_loss = tf.clip_by_value(ratio, 1.0 - clip_param, 1.0 + clip_param) * self.sy_adv_n  #
-        loss = - tf.reduce_mean(tf.minimum(cpi_loss, clip_loss))
-
+            # ========================================================================================#
+            #                           ----------PROBLEM 2----------
+            # Loss Function and Training Operation
+            # Use the PPO lose function
+            # ========================================================================================#
+            ratio = tf.exp(self.sy_new_logprob_n - self.sy_old_logprob_n)
+            cpi_loss = ratio * self.sy_adv_n
+            clip_param = .2
+            clip_loss = tf.clip_by_value(ratio, 1.0 - clip_param, 1.0 + clip_param) * self.sy_adv_n  #
+            loss = - tf.reduce_mean(tf.minimum(cpi_loss, clip_loss))
+            tf.summary.scalar('Loss', loss)
 
         self.update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(loss)
 
@@ -309,9 +312,25 @@ class Agent(object):
                 size=self.size))
 
             # YOUR_CODE_HERE
-            self.sy_target_n = tf.placeholder(dtype=tf.float32, shape=[None])
-            baseline_loss = tf.losses.mean_squared_error(self.sy_target_n, self.baseline_prediction)
-            self.baseline_update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(baseline_loss)
+            self.sy_target_n = tf.placeholder(dtype=tf.float32, shape=[None], name="ValueTarget")
+
+            with tf.name_scope("ValueLoss"):
+                baseline_loss = tf.losses.mean_squared_error(self.sy_target_n, self.baseline_prediction)
+                self.baseline_update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(baseline_loss)
+                tf.summary.scalar('Valueloss', baseline_loss)
+
+        self.summ = tf.summary.merge_all()
+
+        self.writer = tf.summary.FileWriter(logdir)
+        self.writer.add_graph(tf.get_default_graph())
+
+        self.reward = tf.placeholder(tf.float32, [None])
+        self.el = tf.placeholder(tf.float32, [None])
+
+        self.more_summ = [tf.summary.scalar("AverageReward", tf.reduce_mean(self.reward)),
+                          tf.summary.scalar("MaxRward", tf.reduce_max(self.reward)),
+                          tf.summary.scalar("MinReward", tf.reduce_min(self.reward)),
+                          tf.summary.scalar("EpLen", tf.reduce_mean(self.el))]
 
     def sample_trajectories(self, itr, env):
         # Collect paths until we have enough timesteps
@@ -513,11 +532,18 @@ class Agent(object):
             adv_n = (adv_n - np.mean(adv_n)) / np.std(adv_n)
         return q_n, adv_n
 
-
     def copy_new_to_old(self):
         self.sess.run(self.new2old)
 
-    def update_parameters(self, ob_no, ac_na, q_n, adv_n):
+    def add_to_tensorboard(self, reward, eplen, steps):
+
+        ms = self.sess.run(self.more_summ, {self.reward: reward,
+                                            self.el: eplen})
+
+        for m in ms:
+            self.writer.add_summary(m, steps)
+
+    def update_parameters(self, ob_no, ac_na, q_n, adv_n, step):
         """ 
             Update the parameters of the policy and (possibly) the neural network baseline, 
             which is trained to approximate the value function.
@@ -551,21 +577,10 @@ class Agent(object):
 
             # YOUR_CODE_HERE
             target_n = (q_n - np.mean(q_n)) / np.std(q_n)
-            self.sess.run(self.baseline_update_op, feed_dict={self.sy_ob_no: ob_no, self.sy_target_n: target_n})
-
-            # ====================================================================================#
-            #                           ----------PROBLEM 3----------
-            # Performing the Policy Update
-            # ====================================================================================#
-
-            # Call the update operation necessary to perform the policy gradient update based on
-            # the current batch of rollouts.
-            #
-            # For debug purposes, you may wish to save the value of the loss function before
-            # and after an update, and then log them below.
-
-            self.sess.run(self.update_op,
-                          feed_dict={self.sy_ob_no: ob_no, self.sy_ac_na: ac_na, self.sy_adv_n: adv_n})
+            _, _, summ = self.sess.run([self.baseline_update_op, self.update_op, self.summ],
+                                       feed_dict={self.sy_ob_no: ob_no, self.sy_ac_na: ac_na, self.sy_adv_n: adv_n,
+                                                  self.sy_target_n: target_n})
+            self.writer.add_summary(summ, step)
 
 
 def train_PG(
@@ -641,7 +656,7 @@ def train_PG(
     agent = Agent(computation_graph_args, sample_trajectory_args, estimate_return_args)
 
     # build computation graph
-    agent.build_computation_graph()
+    agent.build_computation_graph('/tmp/hw2/seed_%d'%seed)
 
     # tensorflow: config, session, variable initialization
     agent.init_tf_sess()
@@ -663,7 +678,7 @@ def train_PG(
         re_n = [path["reward"] for path in paths]
 
         q_n, adv_n = agent.estimate_return(ob_no, re_n)
-        agent.update_parameters(ob_no, ac_na, q_n, adv_n)
+        agent.update_parameters(ob_no, ac_na, q_n, adv_n, itr)
         agent.copy_new_to_old()
 
         # Log diagnostics
@@ -681,6 +696,7 @@ def train_PG(
         logz.log_tabular("TimestepsSoFar", total_timesteps)
         logz.dump_tabular()
         logz.pickle_tf_vars()
+        agent.add_to_tensorboard(returns, ep_lengths, itr)
 
 
 def train_func(args, logdir, seed):
@@ -749,16 +765,16 @@ def main():
 
 
 class ARGS(object):
-    #env_name = 'Humanoid-v2'
-    env_name = 'HalfCheetah-v2' #
+    # env_name = 'Humanoid-v2'
+    env_name = 'HalfCheetah-v2'  #
 
     # exp_name = 'sb_no_rtg_dna_tanh_blr'
-    render = True
+    render = False
     discount = .9
     n_iter = 1000
     ep_len = 150
     seed = 1
-    n_experiments = 2
+    n_experiments = 4
     n_layers = 2
     size = 32
 
@@ -767,7 +783,7 @@ def fast_run():
     args = ARGS()
 
     for batch_size in [10000]:
-        for lr in [.01]:
+        for lr in [.02]:
             for rtg in [True]:
                 for dna in [False]:
                     for baseline in [True]:
