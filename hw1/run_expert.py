@@ -84,7 +84,7 @@ def auto_run():
     args = ARGS()
     args.envname = 'Humanoid-v2'
     args.expert_policy_file = './experts/%s.pkl'%args.envname
-    args.max_timesteps = 4000
+    args.max_timesteps = 150
     args.num_rollouts = 100
     args.render = False
     run(args)

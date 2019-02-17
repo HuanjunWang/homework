@@ -321,6 +321,7 @@ class Agent(object):
 
         self.summ = tf.summary.merge_all()
 
+        self.logdir = logdir
         self.writer = tf.summary.FileWriter(logdir)
         self.writer.add_graph(tf.get_default_graph())
 
@@ -331,6 +332,14 @@ class Agent(object):
                           tf.summary.scalar("MaxRward", tf.reduce_max(self.reward)),
                           tf.summary.scalar("MinReward", tf.reduce_min(self.reward)),
                           tf.summary.scalar("EpLen", tf.reduce_mean(self.el))]
+
+        self.saver = tf.train.Saver()
+
+    def save_model(self, steps):
+        self.saver.save(self.sess, "%s/%d.ckpt" % (self.logdir, steps))
+
+    def load_model(self, steps):
+        self.saver.restore(self.sess, "%s/%d.ckpt" % (self.logdir, steps))
 
     def sample_trajectories(self, itr, env):
         # Collect paths until we have enough timesteps
@@ -543,7 +552,7 @@ class Agent(object):
         for m in ms:
             self.writer.add_summary(m, steps)
 
-    def update_parameters(self, ob_no, ac_na, q_n, adv_n, step):
+    def update_parameters(self, ob_no, ac_na, q_n, adv_n, step, epoch):
         """ 
             Update the parameters of the policy and (possibly) the neural network baseline, 
             which is trained to approximate the value function.
@@ -577,10 +586,11 @@ class Agent(object):
 
             # YOUR_CODE_HERE
             target_n = (q_n - np.mean(q_n)) / np.std(q_n)
-            _, _, summ = self.sess.run([self.baseline_update_op, self.update_op, self.summ],
-                                       feed_dict={self.sy_ob_no: ob_no, self.sy_ac_na: ac_na, self.sy_adv_n: adv_n,
-                                                  self.sy_target_n: target_n})
-            self.writer.add_summary(summ, step)
+            for _ in range(epoch):
+                _, _, summ = self.sess.run([self.baseline_update_op, self.update_op, self.summ],
+                                           feed_dict={self.sy_ob_no: ob_no, self.sy_ac_na: ac_na, self.sy_adv_n: adv_n,
+                                                      self.sy_target_n: target_n})
+            # self.writer.add_summary(summ, step)
 
 
 def train_PG(
@@ -598,7 +608,8 @@ def train_PG(
         nn_baseline,
         seed,
         n_layers,
-        size):
+        size,
+        epoch, evaluate=False):
     start = time.time()
 
     # ========================================================================================#
@@ -656,7 +667,8 @@ def train_PG(
     agent = Agent(computation_graph_args, sample_trajectory_args, estimate_return_args)
 
     # build computation graph
-    agent.build_computation_graph('/tmp/hw2/seed_%d'%seed)
+    agent.build_computation_graph(
+        '/tmp/hw2/%s/seed_%d_lr_%f_batch_%d_epoch_%d' % (env_name, seed, learning_rate, min_timesteps_per_batch, epoch))
 
     # tensorflow: config, session, variable initialization
     agent.init_tf_sess()
@@ -665,41 +677,56 @@ def train_PG(
     # Training Loop
     # ========================================================================================#
 
-    total_timesteps = 0
-    for itr in range(n_iter):
-        print("********** Iteration %i ************" % itr)
-        paths, timesteps_this_batch = agent.sample_trajectories(itr, env)
-        total_timesteps += timesteps_this_batch
+    if evaluate:
+        reward = 0
+        agent.load_model(799)
+        for _ in range(10):
+            path = agent.sample_trajectory(env, True)
+            reward += path['reward']
 
-        # Build arrays for observation, action for the policy gradient update by concatenating 
-        # across paths
-        ob_no = np.concatenate([path["observation"] for path in paths])
-        ac_na = np.concatenate([path["action"] for path in paths])
-        re_n = [path["reward"] for path in paths]
-
-        q_n, adv_n = agent.estimate_return(ob_no, re_n)
-        agent.update_parameters(ob_no, ac_na, q_n, adv_n, itr)
-        agent.copy_new_to_old()
-
-        # Log diagnostics
-        returns = [path["reward"].sum() for path in paths]
-        ep_lengths = [pathlength(path) for path in paths]
-        logz.log_tabular("Time", time.time() - start)
-        logz.log_tabular("Iteration", itr)
-        logz.log_tabular("AverageReturn", np.mean(returns))
-        logz.log_tabular("StdReturn", np.std(returns))
-        logz.log_tabular("MaxReturn", np.max(returns))
-        logz.log_tabular("MinReturn", np.min(returns))
-        logz.log_tabular("EpLenMean", np.mean(ep_lengths))
-        logz.log_tabular("EpLenStd", np.std(ep_lengths))
-        logz.log_tabular("TimestepsThisBatch", timesteps_this_batch)
-        logz.log_tabular("TimestepsSoFar", total_timesteps)
-        logz.dump_tabular()
-        logz.pickle_tf_vars()
-        agent.add_to_tensorboard(returns, ep_lengths, itr)
+        print("Mean Reward:", sum(reward) / 10)
 
 
-def train_func(args, logdir, seed):
+
+    else:
+        total_timesteps = 0
+        for itr in range(n_iter):
+            print("********** Iteration %i ************" % itr)
+            paths, timesteps_this_batch = agent.sample_trajectories(itr, env)
+            total_timesteps += timesteps_this_batch
+
+            # Build arrays for observation, action for the policy gradient update by concatenating
+            # across paths
+            ob_no = np.concatenate([path["observation"] for path in paths])
+            ac_na = np.concatenate([path["action"] for path in paths])
+            re_n = [path["reward"] for path in paths]
+
+            q_n, adv_n = agent.estimate_return(ob_no, re_n)
+            agent.update_parameters(ob_no, ac_na, q_n, adv_n, itr, epoch)
+            agent.copy_new_to_old()
+
+            # Log diagnostics
+            returns = [path["reward"].sum() for path in paths]
+            ep_lengths = [pathlength(path) for path in paths]
+            logz.log_tabular("Time", time.time() - start)
+            logz.log_tabular("Iteration", itr)
+            logz.log_tabular("AverageReturn", np.mean(returns))
+            logz.log_tabular("StdReturn", np.std(returns))
+            logz.log_tabular("MaxReturn", np.max(returns))
+            logz.log_tabular("MinReturn", np.min(returns))
+            logz.log_tabular("EpLenMean", np.mean(ep_lengths))
+            logz.log_tabular("EpLenStd", np.std(ep_lengths))
+            logz.log_tabular("TimestepsThisBatch", timesteps_this_batch)
+            logz.log_tabular("TimestepsSoFar", total_timesteps)
+            logz.dump_tabular()
+            logz.pickle_tf_vars()
+            agent.add_to_tensorboard(returns, ep_lengths, itr)
+
+            if (itr + 1) % 100 == 0:
+                agent.save_model(itr)
+
+
+def train_func(args, logdir, seed, evaluate):
     max_path_length = args.ep_len if args.ep_len > 0 else None
     train_PG(
         exp_name=args.exp_name,
@@ -716,7 +743,9 @@ def train_func(args, logdir, seed):
         nn_baseline=args.nn_baseline,
         seed=seed,
         n_layers=args.n_layers,
-        size=args.size
+        size=args.size,
+        epoch=args.epoch,
+        evaluate=evaluate
     )
 
 
@@ -765,25 +794,27 @@ def main():
 
 
 class ARGS(object):
-    # env_name = 'Humanoid-v2'
+    #env_name = 'Humanoid-v2'
     env_name = 'HalfCheetah-v2'  #
 
     # exp_name = 'sb_no_rtg_dna_tanh_blr'
     render = False
     discount = .9
-    n_iter = 1000
+    n_iter = 4000
     ep_len = 150
-    seed = 1
+    seed = 2
     n_experiments = 4
     n_layers = 2
     size = 32
+    epoch = 32
+    evaluate = False
 
 
 def fast_run():
     args = ARGS()
 
-    for batch_size in [10000]:
-        for lr in [.02]:
+    for batch_size in [3000]:
+        for lr in [.0008]:
             for rtg in [True]:
                 for dna in [False]:
                     for baseline in [True]:
@@ -813,7 +844,7 @@ def fast_run():
                             print('Running experiment with seed %d' % seed)
                             # # Awkward hacky process runs, because Tensorflow does not like
                             # # repeatedly calling train_PG in the same thread.
-                            p = Process(target=train_func, args=(args, logdir, seed))
+                            p = Process(target=train_func, args=(args, logdir, seed, args.evaluate))
                             p.start()
                             processes.append(p)
                             # if you comment in the line below, then the loop will block
